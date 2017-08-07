@@ -1,4 +1,4 @@
-package goflat
+package gdl
 
 import (
 	"fmt"
@@ -8,8 +8,17 @@ import (
 	"reflect"
 	"testing"
 
-	"h12.me/goflat/internal/testpkg"
+	"h12.me/gdl/internal/testpkg"
 )
+
+func TestGoflat(t *testing.T) {
+	v := &testpkg.TestStruct{}
+	pkg, err := Parse(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg.ToFlatBuffers(os.Stdout)
+}
 
 type (
 	Package struct {
@@ -33,17 +42,28 @@ const (
 	Struct = Kind(reflect.Struct)
 )
 
-func (p *Package) IDL(w io.Writer) error {
-	fp := fmt.Fprintf
-	fp(w, "namespace %s;\n\n", p.Name)
+type printer struct {
+	w io.Writer
+}
+
+func (p printer) Printlnf(format string, v ...interface{}) {
+	fmt.Fprintf(p.w, format, v...)
+	fmt.Fprintln(p.w, "")
+}
+
+func (p *Package) ToFlatBuffers(w io.Writer) error {
+	fp := printer{w}.Printlnf
+	fp("namespace %s;", p.Name)
+	fp("")
 	for _, t := range p.Types {
 		switch t.Kind {
 		case Struct:
-			fp(w, "struct %s {\n", t.Name)
+			fp("struct %s {", t.Name)
 			for _, field := range t.Fields {
-				fp(w, "%s:%s;\n", field.Name, idlType(field.Type.Name))
+				fp("%s:%s;", field.Name, idlType(field.Type.Name))
 			}
-			fp(w, "}\n")
+			fp("}")
+			fp("")
 		}
 	}
 	return nil
@@ -54,15 +74,6 @@ func idlType(goType string) string {
 		return "long"
 	}
 	return goType
-}
-
-func TestGoflat(t *testing.T) {
-	v := &testpkg.TestStruct{}
-	pkg, err := Parse(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkg.IDL(os.Stdout)
 }
 
 func Parse(v interface{}) (*Package, error) {
@@ -91,7 +102,7 @@ func (p *Package) parseType(t reflect.Type) (*Type, error) {
 		Kind: Kind(t.Kind()),
 	}
 	switch t.Kind() {
-	case reflect.Int:
+	case reflect.Int, reflect.String:
 		return typ, nil
 	case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
@@ -110,4 +121,21 @@ func (p *Package) parseType(t reflect.Type) (*Type, error) {
 	}
 	p.Types = append(p.Types, typ)
 	return typ, nil
+}
+
+func (p *Package) ToProtocolBuffers(w io.Writer) error {
+	fp := printer{w}.Printlnf
+	fp(`syntax = "proto3";`)
+	fp(``)
+	for _, t := range p.Types {
+		switch t.Kind {
+		case Struct:
+			fp("struct %s {", t.Name)
+			for _, field := range t.Fields {
+				fp("%s:%s;", field.Name, idlType(field.Type.Name))
+			}
+			fp("}")
+		}
+	}
+	return nil
 }
