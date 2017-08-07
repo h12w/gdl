@@ -1,2 +1,2 @@
-goflat: A Generator from Go Types to FlatBuffers IDL
-====================================================
+gdl: A Generator from Go Types to IDL
+=====================================

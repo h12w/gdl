@@ -2,25 +2,68 @@ package gdl
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path"
 	"reflect"
 	"testing"
-
-	"h12.me/gdl/internal/testpkg"
 )
 
 func TestGoflat(t *testing.T) {
-	v := &testpkg.TestStruct{}
-	pkg, err := Parse(v)
+	f, err := ParseFile("internal/testpkg/testfile.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkg.ToFlatBuffers(os.Stdout)
+	f.ToProtocolBuffers(os.Stdout)
+}
+
+func ParseFile(filename string) (*File, error) {
+	f, err := parser.ParseFile(token.NewFileSet(), filename, nil, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	var types []*Type
+	for _, decl := range f.Decls {
+		switch d := decl.(type) {
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					switch t := s.Type.(type) {
+					case *ast.StructType:
+						fields := make([]Field, len(t.Fields.List))
+						for i, field := range t.Fields.List {
+							if len(field.Names) > 1 {
+								return nil, fmt.Errorf("field should have only 1 name %v", field.Pos())
+							}
+							fields[i].Name = field.Names[0].Name
+							fields[i].Type = &Type{} //TODO
+						}
+						types = append(types, &Type{
+							Name:   s.Name.Name,
+							Kind:   Struct,
+							Fields: fields,
+						})
+					}
+				}
+			}
+		}
+	}
+	return &File{
+		Name:  f.Name.Name,
+		Types: types,
+	}, nil
 }
 
 type (
+	File struct {
+		Name  string
+		Types []*Type
+	}
+
 	Package struct {
 		Name  string
 		Types []*Type
@@ -32,6 +75,7 @@ type (
 	}
 	Field struct {
 		Name string
+		ID   string
 		Type *Type
 	}
 	Kind int
@@ -123,11 +167,13 @@ func (p *Package) parseType(t reflect.Type) (*Type, error) {
 	return typ, nil
 }
 
-func (p *Package) ToProtocolBuffers(w io.Writer) error {
+func (f *File) ToProtocolBuffers(w io.Writer) error {
 	fp := printer{w}.Printlnf
+
 	fp(`syntax = "proto3";`)
 	fp(``)
-	for _, t := range p.Types {
+	fp(`package %s;`, f.Name)
+	for _, t := range f.Types {
 		switch t.Kind {
 		case Struct:
 			fp("struct %s {", t.Name)
